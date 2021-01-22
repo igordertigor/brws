@@ -1,0 +1,7 @@
+textract
+scikit-learn
+pandas
+docopt
+tqdm
+spacy
+matplotlib

@@ -42,5 +42,6 @@ setup(
     cmdclass={
         'develop': PostDevelopCommand,
         'install': PostInstallCommand,
-    }
+    },
+    python_requires=">=3.4"
 )

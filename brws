@@ -13,10 +13,14 @@ Options:
         "anchor" per line. Anchors can be single words or short sentences and
         they will be printed in the approximate position that they describe
         best. [Default: .anchors]
+    -c, --no-cache
+        Do not use file cache.
 """
 from docopt import docopt
 import os
 import sys
+from hashlib import sha1
+import json
 import glob
 from tqdm import tqdm
 import textract
@@ -29,6 +33,7 @@ import pylab as plt
 
 class Vectorizer:
     def __init__(self, embedding_name='en_core_web_sm'):
+        self.embedding_name = embedding_name
         try:
             self.embed = spacy.load(embedding_name)
         except OSError:
@@ -119,22 +124,89 @@ def parse_file(fname):
     return text.decode('utf-8')
 
 
+class Cache:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        return
+
+
+class NoCache(Cache):
+    def __init__(self, folder, vec):
+        self.vec = vec
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        return
+
+    def fetch(self, filename):
+        return parse_file(filename)
+
+
+class FolderCache(Cache):
+    def __init__(self, folder, vec):
+        self.vec = vec
+        self.location = os.path.join(folder, '.brws')
+        if os.path.exists(self.location):
+            with open(self.location) as f:
+                self.content = json.load(f)
+        else:
+            self.content = {}
+
+    def __exit__(self, *args, **kwargs):
+        with open(self.location, 'w') as f:
+            json.dump(self.content, f)
+
+    def fetch(self, filename):
+        h = self.get_hash(filename)
+
+        if self.is_cached(filename, h):
+            return self.content[filename]['vec']
+
+        vec = self.vec.process(parse_file(filename)).tolist()
+        self.content[filename] = {
+            'hash': h,
+            'vec': vec,
+            'embedding': self.vec.embedding_name
+        }
+        return vec
+
+    def is_cached(self, filename, h):
+        return (filename in self.content and
+                self.content[filename]['hash'] == h and
+                self.content[filename]['embedding'] == self.vec.embedding_name)
+
+    @staticmethod
+    def get_hash(filename):
+        with open(filename, 'rb') as f:
+            return sha1(f.read()).hexdigest()
+
+
 if __name__ == '__main__':
     args = docopt(__doc__)
     folder = args['--folder']
     anchors = read_anchors(os.path.join(folder, args['--anchors']))
-
     vec = Vectorizer(args['--embedding'])
-    files = glob.glob(os.path.join(folder, '*'))
+
+    if args['--no-cache']:
+        reader = NoCache(folder, vec)
+    else:
+        reader = FolderCache(folder, vec)
+
+    files = glob.glob(os.path.join(folder, '*.*'))
     extensions = [os.path.splitext(fname)[1] for fname in files]
-    embeddings = np.array(
-        [
-            vec.process(anchor) for anchor in anchors
-        ] +
-        [
-            vec.process(parse_file(fname)) for fname in tqdm(files)
-        ]
-    )
+    with reader:
+        embeddings = np.array(
+            [
+                reader.vec.process(anchor) for anchor in anchors
+            ] +
+            [
+                reader.fetch(fname) for fname in tqdm(files)
+            ]
+        )
     vis = TSNE(init='pca', random_state=1).fit_transform(embeddings)
 
     display(pd.DataFrame({

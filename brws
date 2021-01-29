@@ -15,6 +15,10 @@ Options:
         best. [Default: .anchors]
     -c, --no-cache
         Do not use file cache.
+    --clear-cache
+        Remove cache file before running
+    --cache-file=<cache_file>
+        Name of cache file. Normally, you wouldn't touch this. [Default: .brws]
 """
 from docopt import docopt
 import os
@@ -133,7 +137,7 @@ class Cache:
 
 
 class NoCache(Cache):
-    def __init__(self, folder, vec):
+    def __init__(self, folder, vec, filename=''):
         self.vec = vec
 
     def __enter__(self):
@@ -145,11 +149,14 @@ class NoCache(Cache):
     def fetch(self, filename):
         return parse_file(filename)
 
+    def clear(self):
+        pass
+
 
 class FolderCache(Cache):
-    def __init__(self, folder, vec):
+    def __init__(self, folder, vec, filename='.brws'):
         self.vec = vec
-        self.location = os.path.join(folder, '.brws')
+        self.location = os.path.join(folder, filename)
         if os.path.exists(self.location):
             with open(self.location) as f:
                 self.content = json.load(f)
@@ -174,6 +181,10 @@ class FolderCache(Cache):
         }
         return vec
 
+    def clear(self):
+        os.unlink(self.location)
+        self.content = {}
+
     def is_cached(self, filename, h):
         return (filename in self.content and
                 self.content[filename]['hash'] == h and
@@ -192,9 +203,12 @@ if __name__ == '__main__':
     vec = Vectorizer(args['--embedding'])
 
     if args['--no-cache']:
-        reader = NoCache(folder, vec)
+        reader = NoCache(folder, vec, args['--cache-file'])
     else:
-        reader = FolderCache(folder, vec)
+        reader = FolderCache(folder, vec, args['--cache-file'])
+
+    if args['--clear-cache']:
+        reader.clear()
 
     files = glob.glob(os.path.join(folder, '*.*'))
     extensions = [os.path.splitext(fname)[1] for fname in files]
